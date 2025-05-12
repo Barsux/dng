@@ -5,6 +5,7 @@ class TaskExecutor {
         this.remainingTasks = remainingTasks;
         this.currentTaskIndex = 0;
         this.taskContainer = $('#taskContainer');
+        this.eventSource = null;
     }
 
     createTaskCard(taskId, taskType) {
@@ -19,7 +20,7 @@ class TaskExecutor {
                         <span class="progress-bar" style="width: 0%"></span>
                     </div>
                     <p class="status">Initializing...</p>
-                    <div class="log-container" id="logs-${taskId}">
+                    <div class="log-container" id="logs-${taskId}" style="display:none;">
                         <div class="log-entries"></div>
                     </div>
                 </div>
@@ -32,7 +33,7 @@ class TaskExecutor {
 
     toggleLogs(taskId) {
         const logContainer = $(`#logs-${taskId}`);
-        const button = logContainer.siblings('.task-header').find('.toggle-logs');
+        const button = $(`#task-${taskId}`).find('.toggle-logs');
         
         if (logContainer.is(':hidden')) {
             logContainer.show();
@@ -53,6 +54,9 @@ class TaskExecutor {
 
     startNextTask() {
         if (this.remainingTasks.length === 0) {
+            if (this.eventSource) {
+                this.eventSource.close();
+            }
             return;
         }
 
@@ -69,42 +73,44 @@ class TaskExecutor {
             this.taskTypes.push(data.task_type);
             this.remainingTasks = data.remaining_tasks;
             this.createTaskCard(data.task_id, data.task_type);
-            this.monitorTask(data.task_id, data.task_type);
         })
         .fail(error => {
             console.error('Failed to start next task:', error);
         });
     }
 
-    monitorTask(taskId, taskType) {
-        const taskCard = $(`#task-${taskId}`);
-        const progressBar = taskCard.find('.progress-bar');
-        const statusText = taskCard.find('.status');
-        
-        const updateProgress = () => {
-            $.get(`/task_status/${taskId}`)
-                .done(data => {
-                    progressBar.css('width', `${data.progress}%`);
-                    let statusMessage = `Task state: ${data.state}, Progress: ${data.progress}%`;
-                    if (data.message) {
-                        statusMessage += ` - ${data.message}`;
-                    }
-                    statusText.text(statusMessage);
-                    
-                    if (data.logs) {
-                        this.updateLogs(taskId, data.logs);
-                    }
-                    
-                    if (data.state !== 'SUCCESS' && data.state !== 'FAILURE') {
-                        setTimeout(updateProgress, 1000);
-                    } else {
-                        // Start next task if available
-                        this.startNextTask();
-                    }
-                });
+    handleSSE() {
+        this.eventSource = new EventSource("/stream");
+
+        this.eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const taskId = data.task_id;
+
+            const taskCard = $(`#task-${taskId}`);
+            if (taskCard.length === 0) return;
+
+            const progressBar = taskCard.find('.progress-bar');
+            const statusText = taskCard.find('.status');
+
+            progressBar.css('width', `${data.progress}%`);
+            let statusMessage = `Task state: ${data.state}, Progress: ${data.progress}%`;
+            if (data.message) {
+                statusMessage += ` - ${data.message}`;
+            }
+            statusText.text(statusMessage);
+
+            if (data.logs) {
+                this.updateLogs(taskId, data.logs);
+            }
+
+            if (data.state === 'SUCCESS' || data.state === 'FAILURE') {
+                this.startNextTask();
+            }
         };
-        
-        updateProgress();
+
+        this.eventSource.onerror = (e) => {
+            console.error('SSE connection error:', e);
+        };
     }
 
     start() {
@@ -112,8 +118,8 @@ class TaskExecutor {
             const taskId = this.taskIds[0];
             const taskType = this.taskTypes[0];
             this.createTaskCard(taskId, taskType);
-            this.monitorTask(taskId, taskType);
         }
+        this.handleSSE();
     }
 }
 
@@ -131,4 +137,4 @@ $(document).ready(() => {
         const taskId = $(this).data('task-id');
         executor.toggleLogs(taskId);
     });
-}); 
+});
