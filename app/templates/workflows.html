@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Workflow History</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workflows.css') }}">
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar">
+            <a href="{{ url_for('index') }}" class="nav-link">← Back to Tasks</a>
+            <div class="user-info">
+                Welcome, {{ user.username }} | 
+                <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+            </div>
+        </nav>
+
+        <h1>Workflow History</h1>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="workflows-list">
+            {% for workflow in workflows %}
+            <div class="workflow-card">
+                <div class="workflow-header">
+                    <h3>{{ workflow.name }}</h3>
+                    <span class="status status-{{ workflow.status.lower() }}">{{ workflow.status }}</span>
+                </div>
+                
+                <div class="workflow-details">
+                    <p><strong>Created:</strong> {{ workflow.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                    {% if workflow.completed_at %}
+                    <p><strong>Completed:</strong> {{ workflow.completed_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                    {% endif %}
+                    
+                    <div class="tasks-list">
+                        <h4>Tasks:</h4>
+                        <ul>
+                            {% for task_type, task_id in workflow.task_types|zip(workflow.task_ids) %}
+                            <li>
+                                {{ task_type }}
+                                {% if workflow.task_results and workflow.task_results[task_id] %}
+                                <span class="task-result">{{ workflow.task_results[task_id] }}</span>
+                                {% endif %}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="workflow-actions">
+                    <a href="{{ url_for('view_workflow', workflow_id=workflow.id) }}" class="button">View Details</a>
+                </div>
+            </div>
+            {% else %}
+            <div class="no-workflows">
+                <p>No workflows found. Start a new task to create a workflow.</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html> 
