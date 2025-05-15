@@ -58,7 +58,7 @@ class TestConnTask(BaseTask):
 
 # Create Celery task
 @celery.task(bind=True)
-def conn_task(self):
+def conn_task(self, previous_result=None):
     task = TestConnTask()
     task.task = self  # Set the Celery task instance
     return task.run()
