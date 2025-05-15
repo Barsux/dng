@@ -1,0 +1,67 @@
+body {
+    background-color: #f8f9fa;
+}
+
+.container {
+    max-width: 1200px;
+}
+
+#taskLogs {
+    font-family: monospace;
+    font-size: 0.9em;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+}
+
+.progress {
+    height: 25px;
+}
+
+.progress-bar {
+    transition: width 0.5s ease;
+    background-color: #007bff;
+}
+
+.list-group-item {
+    margin-bottom: 10px;
+    border-radius: 4px !important;
+}
+
+.list-group-item h5 {
+    color: #007bff;
+    margin-bottom: 10px;
+}
+
+.form-check {
+    margin-bottom: 10px;
+}
+
+.navbar {
+    margin-bottom: 30px;
+}
+
+#authForms {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+#loginForm, #registerForm {
+    padding: 20px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#username {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.auth-toggle {
+    cursor: pointer;
+    color: #007bff;
+    text-decoration: none;
+}
+
+.auth-toggle:hover {
+    text-decoration: underline;
+} 
