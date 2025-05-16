@@ -3,10 +3,12 @@ from app import app, celery
 from app.tasks.sample_task import long_running_task
 from app.tasks.test_conn_task import conn_task
 from app.auth import login_required, login_user, logout_user, register_user, get_current_user
-from app.database import get_db, Workflow
+from app.database import get_db, Workflow, Session
 from datetime import datetime
 from celery import chain
 import os
+import redis
+import json
 
 # Serve static files
 @app.route('/')
@@ -62,18 +64,18 @@ def logout():
 @app.route('/api/workflows')
 @login_required
 def get_workflows():
-    db = get_db()
-    user_workflows = db.query(Workflow).filter_by(user_id=session['user_id']).order_by(Workflow.created_at.desc()).all()
-    return jsonify({
-        'workflows': [{
-            'id': w.id,
-            'name': w.name,
-            'status': w.status,
-            'created_at': w.created_at.isoformat(),
-            'completed_at': w.completed_at.isoformat() if w.completed_at else None,
-            'task_types': w.task_types
-        } for w in user_workflows]
-    })
+    with get_db() as db:
+        user_workflows = db.query(Workflow).filter_by(user_id=session['user_id']).order_by(Workflow.created_at.desc()).all()
+        return jsonify({
+            'workflows': [{
+                'id': w.id,
+                'name': w.name,
+                'status': w.status,
+                'created_at': w.created_at.isoformat(),
+                'completed_at': w.completed_at.isoformat() if w.completed_at else None,
+                'task_types': w.task_types
+            } for w in user_workflows]
+        })
 
 @app.route('/api/workflows/start', methods=['POST'])
 @login_required
@@ -84,94 +86,50 @@ def start_workflow():
     if not selected_tasks:
         return jsonify({"error": "No tasks selected"}), 400
     
-    # Create workflow record
-    db = get_db()
-    workflow = Workflow(
-        user_id=session['user_id'],
-        name=f"Workflow {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
-        task_types=selected_tasks,
-        task_ids=[],
-        status='PENDING'
-    )
-    db.add(workflow)
-    db.commit()
-    
-    # Create task chain
-    task_chain = []
-    for task_type in selected_tasks:
-        if task_type == 'conn':
-            task_chain.append(conn_task.s())
-        else:  # default to sample task
-            task_chain.append(long_running_task.s())
-    
-    # Execute chain
-    workflow_chain = chain(*task_chain)
-    result = workflow_chain.apply_async()
-    
-    # Store chain ID
-    workflow.task_ids = [result.id]
-    workflow.status = 'RUNNING'
-    db.commit()
-    
-    return jsonify({
-        'success': True,
-        'workflow_id': workflow.id
-    })
+    with get_db() as db:
+        workflow = Workflow(
+            user_id=session['user_id'],
+            name=f"Workflow {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+            task_types=selected_tasks,
+            task_ids=[],
+            status='PENDING'
+        )
+        db.add(workflow)
+        db.commit()
+        
+        # Create task chain, passing workflow_id to each task
+        task_chain = []
+        for task_type in selected_tasks:
+            if task_type == 'conn':
+                task_chain.append(conn_task.s(workflow_id=workflow.id))
+            else:  # default to sample task
+                task_chain.append(long_running_task.s(workflow_id=workflow.id))
+        
+        # Execute chain
+        from celery import chain as celery_chain
+        workflow_chain = celery_chain(*task_chain)
+        result = workflow_chain.apply_async()
+        
+        # Store chain ID
+        workflow.task_ids = [result.id]
+        workflow.status = 'RUNNING'
+        db.commit()
+        
+        return jsonify({
+            'success': True,
+            'workflow_id': workflow.id
+        })
 
 @app.route('/api/workflows/<int:workflow_id>/status')
 @login_required
 def workflow_status(workflow_id):
-    db = get_db()
-    workflow = db.query(Workflow).filter_by(id=workflow_id, user_id=session['user_id']).first()
-    if not workflow:
-        abort(404)
-    
-    if not workflow.task_ids:
+    r = redis.Redis(host='localhost', port=34444, db=0)
+    progress_json = r.get(f'workflow:{workflow_id}:progress')
+    if progress_json:
+        task_status = json.loads(progress_json)
         return jsonify({
-            'state': 'PENDING',
-            'progress': 0,
-            'logs': []
+            'overall_progress': task_status['progress'],
+            'tasks': [task_status]
         })
-    
-    # Get the chain result
-    chain_id = workflow.task_ids[0]
-    result = celery.AsyncResult(chain_id)
-    
-    if result.ready():
-        if result.successful():
-            workflow.status = 'COMPLETED'
-            workflow.completed_at = datetime.utcnow()
-            workflow.task_results = result.get()
-            db.commit()
-            
-            return jsonify({
-                'state': 'SUCCESS',
-                'progress': 100,
-                'result': result.get(),
-                'logs': result.get().get('logs', []) if isinstance(result.get(), dict) else []
-            })
-        else:
-            workflow.status = 'FAILED'
-            workflow.completed_at = datetime.utcnow()
-            db.commit()
-            
-            return jsonify({
-                'state': 'FAILURE',
-                'progress': 0,
-                'error': str(result.result),
-                'logs': []
-            })
-    
-    # For tasks in progress
-    if isinstance(result.info, dict):
-        progress = result.info.get('progress', 0)
-        logs = result.info.get('logs', [])
     else:
-        progress = 0
-        logs = []
-    
-    return jsonify({
-        'state': result.state,
-        'progress': progress,
-        'logs': logs
-    }) 
+        return jsonify({'overall_progress': 0, 'tasks': []}) 

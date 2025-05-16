@@ -131,24 +131,35 @@ $(document).ready(function() {
     }
 
     function monitorWorkflow(workflowId) {
-        const progressBar = $('.progress-bar');
-        const taskLogs = $('#taskLogs');
+        const tasksContainer = $('#tasksContainer');
 
         function updateProgress() {
             $.get(`/api/workflows/${workflowId}/status`)
                 .done(function(response) {
-                    progressBar.css('width', `${response.progress}%`);
-                    progressBar.text(`${response.progress}%`);
-
-                    // Update logs
-                    if (response.logs && response.logs.length > 0) {
-                        taskLogs.html(response.logs.join('<br>'));
-                        taskLogs.scrollTop(taskLogs[0].scrollHeight);
+                    tasksContainer.empty();
+                    if (!response.tasks || response.tasks.length === 0) {
+                        tasksContainer.append('<div class="text-muted">Waiting for tasks to start...</div>');
+                    } else {
+                        response.tasks.forEach(function(task, idx) {
+                            const taskDiv = $(`
+                                <div class="mb-3 border p-2">
+                                    <div><b>Task #${idx + 1} (${task.task_id})</b></div>
+                                    <div class="progress mb-1">
+                                        <div class="progress-bar" role="progressbar" style="width: ${task.progress}%">${task.progress}%</div>
+                                    </div>
+                                    <div><b>Status:</b> ${task.state} ${task.message ? '- ' + task.message : ''}</div>
+                                    <div style="max-height:100px;overflow-y:auto;font-size:small;background:#f8f9fa;padding:5px;">
+                                        ${task.logs && task.logs.length ? task.logs.join('<br>') : ''}
+                                    </div>
+                                </div>
+                            `);
+                            tasksContainer.append(taskDiv);
+                        });
                     }
 
-                    if (response.state === 'SUCCESS') {
+                    if (response.overall_progress === 100) {
                         loadWorkflows();
-                    } else if (response.state !== 'FAILURE') {
+                    } else {
                         setTimeout(updateProgress, 1000);
                     }
                 })

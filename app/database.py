@@ -3,10 +3,28 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
+from contextlib import contextmanager
+from sqlalchemy import event
+from sqlalchemy.ext.mutable import MutableList
 
-# Create SQLite database in the app directory
-db_path = os.path.join(os.path.dirname(__file__), 'app.db')
-engine = create_engine(f'sqlite:///{db_path}', echo=True)
+# Set DB path to project root or from environment variable
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+db_path = os.environ.get('DNG_DB_PATH') or os.path.join(project_root, 'dng_app.db')
+print(f"[DB] Using SQLite database at: {db_path}")
+print(f"[DB] Real path: {os.path.realpath(db_path)}")
+if os.path.exists(db_path):
+    print(f"[DB] Inode: {os.stat(db_path).st_ino}")
+else:
+    print("[DB] File does not exist yet (will be created on first write)")
+
+engine = create_engine(f'sqlite:///{db_path}', echo=True, isolation_level='AUTOCOMMIT')
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
+
 Base = declarative_base()
 
 class User(Base):
@@ -40,6 +58,7 @@ class Workflow(Base):
     task_types = Column(JSON, nullable=False)  # List of task types
     task_ids = Column(JSON, nullable=False)    # List of task IDs
     task_results = Column(JSON, nullable=True) # Results of completed tasks
+    task_statuses = Column(MutableList.as_mutable(JSON), nullable=True, default=list) # List of per-task status dicts
     
     # Relationship with user
     user = relationship('User', back_populates='workflows')
@@ -53,10 +72,11 @@ Base.metadata.create_all(engine)
 # Create session factory
 Session = sessionmaker(bind=engine)
 
+@contextmanager
 def get_db():
-    """Get database session"""
+    """Get database session as a context manager"""
     db = Session()
     try:
-        return db
+        yield db
     finally:
         db.close() 
