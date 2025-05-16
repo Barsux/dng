@@ -29,12 +29,12 @@ class SampleTask(BaseTask):
 
 # Create Celery task
 @celery.task(bind=True)
-def long_running_task(self, previous_result=None, workflow_id=None):
-    print(f"[CELERY TASK] long_running_task called with workflow_id={workflow_id}")
+def long_running_task(self, previous_result=None, workflow_id=None, **kwargs):
+    print(f"[CELERY TASK] long_running_task called with workflow_id={workflow_id}, kwargs={kwargs}")
     task = SampleTask()
     task.task = self  # Set the Celery task instance
     try:
-        return task.run(workflow_id=workflow_id)
+        return task.run(workflow_id=workflow_id, **kwargs)
     except Exception as e:
         task.log_final_state(self, 'FAILED', str(e), workflow_id=workflow_id)
         raise 

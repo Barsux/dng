@@ -10,6 +10,7 @@ import os
 import redis
 import json
 from app.tasks.finalize_workflow import finalize_workflow_status
+from app.task_registry import TASK_GROUPS, TASK_DEFINITIONS
 
 # Serve static pages
 @app.route('/')
@@ -118,6 +119,7 @@ def get_workflow(workflow_id):
 def start_workflow():
     data = request.get_json()
     selected_tasks = data.get('task_types', [])
+    group_fields = data.get('group_fields', {})
     
     if not selected_tasks:
         return jsonify({"error": "No tasks selected"}), 400
@@ -133,13 +135,14 @@ def start_workflow():
         db.add(workflow)
         db.commit()
         
-        # Create task chain, passing workflow_id to each task
+        # Create task chain, passing workflow_id and group_fields to each task
         task_chain = []
         for task_type in selected_tasks:
+            task_kwargs = dict(workflow_id=workflow.id, **group_fields)
             if task_type == 'conn':
-                task_chain.append(conn_task.s(workflow_id=workflow.id))
+                task_chain.append(conn_task.s(**task_kwargs))
             else:  # default to sample task
-                task_chain.append(long_running_task.s(workflow_id=workflow.id))
+                task_chain.append(long_running_task.s(**task_kwargs))
         
         # Add finalization task
         from celery import chain as celery_chain
@@ -175,4 +178,11 @@ def workflow_status(workflow_id):
     return jsonify({
         'overall_progress': overall_progress,
         'tasks': tasks
+    })
+
+@app.route('/api/task_groups')
+def get_task_groups():
+    return jsonify({
+        "task_groups": TASK_GROUPS,
+        "task_definitions": TASK_DEFINITIONS
     }) 

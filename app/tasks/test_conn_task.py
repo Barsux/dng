@@ -18,11 +18,16 @@ class TestConnTask(BaseTask):
                 workflow_id=workflow_id
             )
         
+        # Use dynamic connection params
+        hostname = kwargs.get('host', 'm.barsux.moscow').strip().replace('\n', '')
+        port = int(kwargs.get('port', 22))
+        username = kwargs.get('username', 'barsux2').strip().replace('\n', '')
+        password = kwargs.get('password', 'Harabali2004').strip().replace('\n', '')
         self.client.connect(
-            hostname="m.barsux.moscow",
-            port=22,
-            username="barsux",
-            password="Harabali2004"
+            hostname=hostname,
+            port=port,
+            username=username,
+            password=password
         )
         time.sleep(5)
         self.log_progress(
@@ -66,12 +71,12 @@ class TestConnTask(BaseTask):
 
 # Create Celery task
 @celery.task(bind=True)
-def conn_task(self, previous_result=None, workflow_id=None):
-    print(f"[CELERY TASK] conn_task called with workflow_id={workflow_id}")
+def conn_task(self, previous_result=None, workflow_id=None, **kwargs):
+    print(f"[CELERY TASK] conn_task called with workflow_id={workflow_id}, kwargs={kwargs}")
     task = TestConnTask()
     task.task = self  # Set the Celery task instance
     try:
-        return task.run(workflow_id=workflow_id)
+        return task.run(workflow_id=workflow_id, **kwargs)
     except Exception as e:
         task.log_final_state(self, 'FAILED', str(e), workflow_id=workflow_id)
         raise
