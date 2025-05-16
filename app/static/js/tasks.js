@@ -151,6 +151,6 @@ $(document).ready(function() {
             })
             .fail(function() {
                 window.location.href = '/';
-            });
+        });
     }
 }); 
