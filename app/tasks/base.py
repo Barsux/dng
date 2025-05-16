@@ -73,13 +73,35 @@ class BaseTask:
         # --- Redis progress reporting ---
         if workflow_id:
             r = redis.Redis(host='localhost', port=34444, db=0)
-            r.set(f'workflow:{workflow_id}:progress', json.dumps({
-                'task_id': getattr(task, 'request', None) and task.request.id,
-                'state': 'PROGRESS',
-                'progress': progress,
-                'logs': self.logs,
-                'message': message
-            }))
+            # Store per-task progress
+            if hasattr(task, 'request') and hasattr(task.request, 'id'):
+                task_id = task.request.id
+            else:
+                task_id = None
+            if task_id:
+                r.set(f'workflow:{workflow_id}:task:{task_id}:progress', json.dumps({
+                    'task_id': task_id,
+                    'state': 'PROGRESS',
+                    'progress': progress,
+                    'logs': self.logs,
+                    'message': message
+                }))
+
+    def log_final_state(self, task, state, message=None, workflow_id=None):
+        if workflow_id:
+            r = redis.Redis(host='localhost', port=34444, db=0)
+            if hasattr(task, 'request') and hasattr(task.request, 'id'):
+                task_id = task.request.id
+            else:
+                task_id = None
+            if task_id:
+                r.set(f'workflow:{workflow_id}:task:{task_id}:progress', json.dumps({
+                    'task_id': task_id,
+                    'state': state,
+                    'progress': 100,
+                    'logs': self.logs,
+                    'message': message
+                }))
 
     def run(self, *args, **kwargs) -> Dict[str, Any]:
         """Override this method in child classes"""

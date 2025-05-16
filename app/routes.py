@@ -1,4 +1,4 @@
-from flask import jsonify, request, session, abort
+from flask import jsonify, request, session, abort, send_from_directory
 from app import app, celery
 from app.tasks.sample_task import long_running_task
 from app.tasks.test_conn_task import conn_task
@@ -9,11 +9,27 @@ from celery import chain
 import os
 import redis
 import json
+from app.tasks.finalize_workflow import finalize_workflow_status
 
-# Serve static files
+# Serve static pages
 @app.route('/')
 def index():
-    return app.send_static_file('index.html')
+    return send_from_directory('static', 'index.html')
+
+@app.route('/tasks')
+@login_required
+def tasks_page():
+    return send_from_directory('static', 'tasks.html')
+
+@app.route('/workflows')
+@login_required
+def workflows_page():
+    return send_from_directory('static', 'workflows.html')
+
+@app.route('/workflow/<int:workflow_id>')
+@login_required
+def workflow_detail_page(workflow_id):
+    return send_from_directory('static', 'workflow.html')
 
 # Authentication endpoints
 @app.route('/api/auth/status')
@@ -77,6 +93,26 @@ def get_workflows():
             } for w in user_workflows]
         })
 
+@app.route('/api/workflows/<int:workflow_id>')
+@login_required
+def get_workflow(workflow_id):
+    with get_db() as db:
+        workflow = db.query(Workflow).filter_by(id=workflow_id, user_id=session['user_id']).first()
+        if not workflow:
+            return jsonify({'error': 'Workflow not found'}), 404
+        
+        return jsonify({
+            'workflow': {
+                'id': workflow.id,
+                'name': workflow.name,
+                'status': workflow.status,
+                'created_at': workflow.created_at.isoformat(),
+                'completed_at': workflow.completed_at.isoformat() if workflow.completed_at else None,
+                'task_types': workflow.task_types,
+                'task_ids': workflow.task_ids
+            }
+        })
+
 @app.route('/api/workflows/start', methods=['POST'])
 @login_required
 def start_workflow():
@@ -105,9 +141,9 @@ def start_workflow():
             else:  # default to sample task
                 task_chain.append(long_running_task.s(workflow_id=workflow.id))
         
-        # Execute chain
+        # Add finalization task
         from celery import chain as celery_chain
-        workflow_chain = celery_chain(*task_chain)
+        workflow_chain = celery_chain(*task_chain) | finalize_workflow_status.s(workflow_id=workflow.id)
         result = workflow_chain.apply_async()
         
         # Store chain ID
@@ -124,12 +160,19 @@ def start_workflow():
 @login_required
 def workflow_status(workflow_id):
     r = redis.Redis(host='localhost', port=34444, db=0)
-    progress_json = r.get(f'workflow:{workflow_id}:progress')
-    if progress_json:
-        task_status = json.loads(progress_json)
-        return jsonify({
-            'overall_progress': task_status['progress'],
-            'tasks': [task_status]
-        })
-    else:
-        return jsonify({'overall_progress': 0, 'tasks': []}) 
+    # Aggregate all per-task progress
+    keys = r.keys(f'workflow:{workflow_id}:task:*:progress')
+    tasks = []
+    total_progress = 0
+    for key in keys:
+        progress_json = r.get(key)
+        if progress_json:
+            task_status = json.loads(progress_json)
+            tasks.append(task_status)
+            total_progress += task_status.get('progress', 0)
+    num_tasks = len(tasks)
+    overall_progress = int(total_progress / num_tasks) if num_tasks > 0 else 0
+    return jsonify({
+        'overall_progress': overall_progress,
+        'tasks': tasks
+    }) 

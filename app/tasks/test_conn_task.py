@@ -57,6 +57,7 @@ class TestConnTask(BaseTask):
             message=f"Закрыли соединение.",
             workflow_id=workflow_id
         )
+        self.log_final_state(self.task, 'COMPLETED', 'Task completed!', workflow_id=workflow_id)
         return {
             'status': 'Task completed!',
             'progress': 100,
@@ -69,6 +70,10 @@ def conn_task(self, previous_result=None, workflow_id=None):
     print(f"[CELERY TASK] conn_task called with workflow_id={workflow_id}")
     task = TestConnTask()
     task.task = self  # Set the Celery task instance
-    return task.run(workflow_id=workflow_id)
+    try:
+        return task.run(workflow_id=workflow_id)
+    except Exception as e:
+        task.log_final_state(self, 'FAILED', str(e), workflow_id=workflow_id)
+        raise
         
         

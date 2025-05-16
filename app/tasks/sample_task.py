@@ -20,6 +20,7 @@ class SampleTask(BaseTask):
             )
         
         self.log("Sample task completed")
+        self.log_final_state(self.task, 'COMPLETED', 'Task completed!', workflow_id=workflow_id)
         return {
             'status': 'Task completed!',
             'progress': 100,
@@ -32,4 +33,8 @@ def long_running_task(self, previous_result=None, workflow_id=None):
     print(f"[CELERY TASK] long_running_task called with workflow_id={workflow_id}")
     task = SampleTask()
     task.task = self  # Set the Celery task instance
-    return task.run(workflow_id=workflow_id) 
+    try:
+        return task.run(workflow_id=workflow_id)
+    except Exception as e:
+        task.log_final_state(self, 'FAILED', str(e), workflow_id=workflow_id)
+        raise 
